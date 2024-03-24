@@ -1,0 +1,4 @@
+if game.PlaceId == "6516141723" then
+return
+end
+return game:GetService("TextChatService").TextChannels.RBXSystem:DisplaySystemMessage("This Script No Longer Works Due to an Update In Doors, Remove this Script from AutoExecute and Wait Till Theres an Update. Server: 2H6sxbSTbP")
