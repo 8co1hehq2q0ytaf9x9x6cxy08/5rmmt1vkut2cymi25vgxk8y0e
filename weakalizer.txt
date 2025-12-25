@@ -1,0 +1,419 @@
+local StandIns = {
+    {
+        Name = "Part",
+        Members = {
+            { Name = "Anchored", MemberType = "Property", Default = false, ValueType = { Category = "Primitive", Name = "bool" } },
+            { Name = "CanCollide", MemberType = "Property", Default = true, ValueType = { Category = "Primitive", Name = "bool" } },
+            { Name = "Massless", MemberType = "Property", Default = false, ValueType = { Category = "Primitive", Name = "bool" } },
+            { Name = "CFrame", MemberType = "Property", Default = CFrame.new(), ValueType = { Category = "DataType", Name = "CFrame" } },
+            { Name = "Position", MemberType = "Property", Default = Vector3.new(), ValueType = { Category = "DataType", Name = "Vector3" } },
+            { Name = "Orientation", MemberType = "Property", Default = Vector3.new(), ValueType = { Category = "DataType", Name = "Vector3" } },
+            { Name = "Size", MemberType = "Property", Default = Vector3.new(4,1,2), ValueType = { Category = "DataType", Name = "Vector3" } },
+            { Name = "Velocity", MemberType = "Property", Default = Vector3.new(), ValueType = { Category = "DataType", Name = "Vector3" } },
+            { Name = "RotVelocity", MemberType = "Property", Default = Vector3.new(), ValueType = { Category = "DataType", Name = "Vector3" } },
+            { Name = "Color", MemberType = "Property", Default = Color3.new(0.627,0.627,0.627), ValueType = { Category = "DataType", Name = "Color3" } },
+            { Name = "Transparency", MemberType = "Property", Default = 0, ValueType = { Category = "Primitive", Name = "float" } },
+            { Name = "Material", MemberType = "Property", Default = Enum.Material.Plastic, ValueType = { Category = "Enum", Name = "Material" } },
+            { Name = "Reflectance", MemberType = "Property", Default = 0, ValueType = { Category = "Primitive", Name = "float" } },
+        }
+    },
+    {
+        Name = "ManualWeld",
+        Members = {
+            { Name = "Part0", MemberType = "Property", Default = nil, ValueType = { Category = "Class", Name = "BasePart" } },
+            { Name = "Part1", MemberType = "Property", Default = nil, ValueType = { Category = "Class", Name = "BasePart" } },
+            { Name = "C0", MemberType = "Property", Default = CFrame.new(), ValueType = { Category = "DataType", Name = "CFrame" } },
+            { Name = "C1", MemberType = "Property", Default = CFrame.new(), ValueType = { Category = "DataType", Name = "CFrame" } },
+            { Name = "Enabled", MemberType = "Property", Default = true, ValueType = { Category = "Primitive", Name = "bool" } }
+        }
+    },
+    {
+        Name = "LocalScript",
+        Members = {
+            { Name = "Enabled", MemberType = "Property", Default = true, ValueType = { Category = "Primitive", Name = "bool" } },
+            { Name = "Source", MemberType = "Property", Default = "", ValueType = { Category = "Primitive", Name = "string" } }
+        }
+    }
+}
+
+local HttpService = game:GetService("HttpService")
+
+local blockedTags = {
+    readonly = true,
+}
+
+local function fetchAPIProps()
+
+    local function fetchFullAPIDump()
+        local success, data = pcall(function()
+            return game:HttpGet("https://github.com/MaximumADHD/Roblox-Client-Tracker/raw/refs/heads/roblox/Full-API-Dump.json")
+        end)
+        if success and data then
+            return data
+        end
+        return nil
+    end
+
+    local apiData = fetchFullAPIDump()
+    if not apiData then
+        return nil, nil
+    end
+
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(apiData)
+    end)
+    if not ok or not decoded then
+        return nil, nil
+    end
+
+    local decodedClasses = decoded.Classes or decoded
+    
+    for _, Instances in ipairs(StandIns) do
+	    for _, v in ipairs(decodedClasses) do
+		    if v.Name == Instances.Name then
+		        found = true
+		        break
+		    end
+		end
+		if not found then
+		    table.insert(decodedClasses, Instances)
+		end
+    end
+
+    local classes = {}
+    for _, classData in ipairs(decodedClasses) do
+        if classData.Name and classData.Members then
+            local classInfo = {
+                Name = classData.Name,
+                Members = {}
+            }
+            if classData.Superclass then
+	            classInfo.Superclass = classData.Superclass
+            end
+            for _, member in ipairs(classData.Members) do
+                if member.MemberType == "Property" then
+                    local skip = false
+                    for _, tag in ipairs(member.Tags or {}) do
+                        if tag and typeof(tag) == "string" and blockedTags[tag:lower()] then
+                            skip = true
+                            break
+                        end
+                    end
+                    if not skip then
+                        local guh = {MemberType = member.MemberType, Name = member.Name, Tags = member.Tags}
+                        if member.ValueType and member.ValueType.Name then
+	                        guh.ValueType = member.ValueType and member.ValueType.Name
+                        end
+                        table.insert(classInfo.Members, guh)
+                    end
+                end
+            end
+            if #classInfo.Members > 0 then
+                classes[classInfo.Name] = classInfo
+            end
+        end
+    end
+
+    return classes, decodedClasses
+end
+
+local PORCELAIN = { Settings = {Index=true, Debug=true} }
+local Saved = { API = {}, APIRaw = {}, Instances = {}, InstanceIDS = {}, Classes = {} }
+local BoughtaSlanket = {
+    string = function(value, mode)
+        if mode == "raw" then
+            return value
+        end
+        return string.format("[[%s]]", tostring(value))
+    end,
+
+    bool = function(value, mode)
+        if mode == "raw" then
+            return value
+        end
+        return tostring(value)
+    end,
+
+    number = function(value, mode)
+        if mode == "raw" then
+            return value
+        end
+        return tostring(value)
+    end,
+
+    Instance = function(v, mode)
+        if not v then return mode == "raw" and nil or "nil" end
+        if mode == "raw" then
+            return v
+        end
+        local idx = table.find(Saved.Instances, v)
+        if idx then
+            return Saved.InstanceIDS[idx]
+        end
+        local path = {}
+        local c = v
+        while c and c ~= game do
+            table.insert(path, 1, c.Name)
+            c = c.Parent
+        end
+        if c == game then table.insert(path, 1, "game") end
+        return table.concat(path, ".")
+    end,
+
+    Color3 = function(v, mode)
+        if mode == "raw" then
+            return v
+        end
+        local r = math.floor(v.R * 255 + 0.5)
+        local g = math.floor(v.G * 255 + 0.5)
+        local b = math.floor(v.B * 255 + 0.5)
+        return string.format("Color3.fromRGB(%d, %d, %d)", r, g, b)
+    end,
+
+    Vector3 = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("Vector3.new(%s, %s, %s)", tostring(v.X), tostring(v.Y), tostring(v.Z))
+    end,
+
+    Vector2 = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("Vector2.new(%s, %s)", tostring(v.X), tostring(v.Y))
+    end,
+
+    Vector2int16 = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("Vector2int16.new(%s, %s)", tostring(v.X), tostring(v.Y))
+    end,
+
+    Vector3int16 = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("Vector3int16.new(%s, %s, %s)", tostring(v.X), tostring(v.Y), tostring(v.Z))
+    end,
+
+    UDim2 = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("UDim2.new(%s, %s, %s, %s)", tostring(v.X.Scale), tostring(v.X.Offset), tostring(v.Y.Scale), tostring(v.Y.Offset))
+    end,
+
+    UDim = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("UDim.new(%s, %s)", tostring(v.Scale), tostring(v.Offset))
+    end,
+
+    BrickColor = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("BrickColor.new(%q)", tostring(v.Name))
+    end,
+
+    ColorSequence = function(v, mode)
+        if mode == "raw" then return v end
+        local t = {}
+        for _, k in ipairs(v.Keypoints) do
+            table.insert(t, string.format("ColorSequenceKeypoint.new(%s, Color3.fromRGB(%d, %d, %d))",
+                tostring(k.Time),
+                math.floor(k.Value.R*255 + 0.5),
+                math.floor(k.Value.G*255 + 0.5),
+                math.floor(k.Value.B*255 + 0.5)))
+        end
+        return string.format("ColorSequence.new({%s})", table.concat(t, ", "))
+    end,
+
+    NumberSequence = function(v, mode)
+        if mode == "raw" then return v end
+        local t = {}
+        for _, k in ipairs(v.Keypoints) do
+            table.insert(t, string.format("NumberSequenceKeypoint.new(%s, %s)", tostring(k.Time), tostring(k.Value)))
+        end
+        return string.format("NumberSequence.new({%s})", table.concat(t, ", "))
+    end,
+
+    NumberRange = function(v, mode)
+        if mode == "raw" then return v end
+        return string.format("NumberRange.new(%s, %s)", tostring(v.Min), tostring(v.Max))
+    end,
+    
+    Enum = function(value, mode)
+        if mode == "raw" then return value end
+        return string.format("Enum.%s", value and tostring(value):gsub("Enum.",""))
+    end,
+}
+
+Saved.DebugSupported = {}
+Saved.DebugUnsupported = {}
+
+local function Decompiler(inst, normdata, instdata)
+    normdata = normdata or {}
+    instdata = instdata or {}
+    Saved.Classes = Saved.Classes or {}
+    Saved.ClassDefaultsRaw = Saved.ClassDefaultsRaw or {}
+    Saved.ClassDefaultsCode = Saved.ClassDefaultsCode or {}
+
+    if not Saved.Classes[inst.ClassName] then
+        Saved.Classes[inst.ClassName] = Instance.new(inst.ClassName)
+        if Saved.API[inst.ClassName] then
+            Saved.DebugSupported[inst.ClassName] = true
+        else
+            Saved.DebugUnsupported[inst.ClassName] = true
+        end
+    end
+
+    if not table.find(Saved.Instances, inst) then
+        table.insert(Saved.Instances, inst)
+        local name = inst.Name:gsub("[^%w_]", "_")
+        if name:match("^[^a-zA-Z_]") then name = "_" .. name end
+        if PORCELAIN.Settings.Index then name = name .. "_" .. #Saved.Instances end
+        table.insert(Saved.InstanceIDS, name)
+    end
+
+    normdata[inst] = normdata[inst] or {}
+    instdata[inst] = instdata[inst] or {}
+
+    local parentPath = inst.Parent == game and "game" or BoughtaSlanket.Instance(inst.Parent, "string")
+    local idx = table.find(Saved.Instances, inst)
+    local name = Saved.InstanceIDS[idx] or inst.Name:gsub("[^%w_]", "_")
+    if name:match("^[^a-zA-Z_]") then name = "_" .. name end
+    table.insert(normdata[inst], string.format("local %s = Instance.new(%q, %s)", name, inst.ClassName, parentPath))
+    if inst.Name ~= inst.ClassName then
+        table.insert(normdata[inst], string.format("%s.Name = [[%s]]", name, inst.Name))
+    end
+
+    local classDefaultsRaw = Saved.Classes[inst.ClassName] or nil
+    for _, property in ipairs(Saved.API[inst.ClassName] and Saved.API[inst.ClassName].Members or {}) do
+        pcall(function()
+            local defaultValue = classDefaultsRaw[property.Name]
+            local ok, value = pcall(function() return inst[property.Name] end)
+            pcall(function()
+                if ok and value ~= nil and (defaultValue == nil or value ~= defaultValue) then
+	                pcall(function()
+						classDefaultsRaw[property.Value] = classDefaultsRaw[property.Value]
+	                    local typeName = typeof(value)
+	                    local formatter = BoughtaSlanket[typeName]
+	                    if formatter then
+	                        if typeName == "Instance" then
+	                            local serialized = formatter(value, "string")
+	                            table.insert(instdata[inst], {line = string.format("%s.%s = %s", name, property, serialized), deps = {value}})
+	                        else
+	                            local serialized = formatter(value, "string")
+	                            table.insert(normdata[inst], string.format("%s.%s = %s", name, property, serialized))
+	                        end
+	                    end
+					end)
+                end
+            end)
+        end)
+    end
+
+    if inst:IsA("Sound") and inst.Playing then
+        table.insert(normdata[inst], name .. ":Play()")
+    end
+
+    for _, child in ipairs(inst:GetChildren()) do
+        Decompiler(child, normdata, instdata)
+    end
+
+    if Saved.Root and inst == Saved.Root then
+        local lines, deferred, definedInstances = {}, {}, {}
+        for _, sInst in ipairs(Saved.Instances) do definedInstances[sInst] = false end
+
+        for _, sInst in ipairs(Saved.Instances) do
+            for _, line in ipairs(normdata[sInst] or {}) do
+                table.insert(lines, line)
+            end
+            for _, item in ipairs(instdata[sInst] or {}) do
+                table.insert(deferred, {line = item.line, deps = item.deps})
+            end
+            definedInstances[sInst] = true
+            local progress = true
+            while progress do
+                progress = false
+                for i = #deferred, 1, -1 do
+                    local item = deferred[i]
+                    local canInsert = true
+                    for _, dep in ipairs(item.deps) do
+                        if not definedInstances[dep] then
+                            canInsert = false
+                            break
+                        end
+                    end
+                    if canInsert then
+                        table.insert(lines, item.line)
+                        table.remove(deferred, i)
+                        progress = true
+                    end
+                end
+            end
+        end
+
+        while #deferred > 0 do
+            for i = #deferred, 1, -1 do
+                table.insert(lines, deferred[i].line)
+                table.remove(deferred, i)
+            end
+        end
+
+        return table.concat(lines, "\n")
+    end
+end
+
+PORCELAIN.Serialize = function(inst)
+    if not inst then return nil end
+    Saved.Instances = {}
+    Saved.InstanceIDS = {}
+    Saved.Root = inst
+    Saved.Classes = {}
+    Saved.DebugSupported = {}
+    Saved.DebugUnsupported = {}
+    local startTick = tick()
+    local name = inst.Name or "MilkandCereal"
+
+    local function sanitizeName(n)
+        local s = string.gsub(n or "", "[^%w_]", "_")
+        if s:match("^[^a-zA-Z_]") then s = "_" .. s end
+        return s
+    end
+
+    local function gather(node)
+        table.insert(Saved.Instances, node)
+        local name = sanitizeName(node.Name)
+        if PORCELAIN.Settings.Index then name = name .. "_" .. tostring(#Saved.Instances) end
+        table.insert(Saved.InstanceIDS, name)
+        for _, child in ipairs(node:GetChildren()) do
+            gather(child)
+        end
+    end
+
+    gather(inst)
+    Saved.API, Saved.APIRaw = fetchAPIProps()
+    local fileContent = Decompiler(inst)
+    local endTick = tick()
+
+    local SupportedClasses1, UnrecognizedClasses2 = {}, {}
+    for cname,_ in pairs(Saved.DebugSupported) do table.insert(SupportedClasses1, cname) end
+    for cname,_ in pairs(Saved.DebugUnsupported) do table.insert(UnrecognizedClasses2, cname) end
+    table.sort(SupportedClasses1)
+    table.sort(UnrecognizedClasses2)
+	if PORCELAIN.Settings.Debug == true then
+		print(("Started: %s  Ended: %s  Name: %s\nCerealizing Process Complete!"):format(startTick, endTick, name))
+	    print(("API—Supported Classes (%d): %s"):format(#SupportedClasses1, table.concat(SupportedClasses1, ", ")))
+	    print(("API—Unrecognized Classes (%d): %s"):format(#UnrecognizedClasses2, table.concat(UnrecognizedClasses2, ", ")))
+    end
+
+    local debugLines = {"=== API—Supported Classes ("..#SupportedClasses1..") ==="}
+    for _, cname in ipairs(SupportedClasses1) do table.insert(debugLines, cname) end
+    table.insert(debugLines, "\n=== API—Unrecognized Classes ("..#UnrecognizedClasses2..") ===")
+    for _, cname in ipairs(UnrecognizedClasses2) do table.insert(debugLines, cname) end
+
+    if (isfolder and makefolder and not isfolder("CheapCerealizer")) then pcall(makefolder, "CheapCerealizer") end
+    if writefile then
+        local filename = ("CheapCerealizer/%s_%s.txt"):format(name, math.random(1,99999))
+        pcall(writefile, filename, fileContent or "")
+        if PORCELAIN.Settings.Debug == true then
+			writefile("CheapCerealizer/SerializedDebug.txt", table.concat(debugLines, "\n"))
+		end
+    end
+
+    if setclipboard then pcall(setclipboard, fileContent) end
+    return fileContent
+end
+
+PORCELAIN.Serialize(workspace.Crustifix)
